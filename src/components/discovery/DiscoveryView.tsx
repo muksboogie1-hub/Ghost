@@ -212,7 +212,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
     if (existing) return;
 
     const now = new Date().toISOString();
-    const researchNote = 'OpenStreetMap listing found. This verifies only that a map entry exists; current operation, ownership, contact accuracy, and website status still need verification.';
+    const researchNote = 'OpenStreetMap listing found. This verifies only that a map entry exists; current operation, ownership, fit for the selected niche, contact accuracy, and website status still need verification.';
     const partialLead: Partial<Lead> = {
       businessName: candidate.name,
       category,
@@ -469,7 +469,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                 </button>
               </div>
               <div className="text-[11px] text-neutral-500">
-                Source: OpenStreetMap contributors · Live results are map entries, not verified leads. Missing website/contact tags do not prove the business lacks them. Public service availability and Zimbabwe map coverage vary.
+                Source: OpenStreetMap contributors. These are map-listed candidates, not verified leads. Healthcare map tags do not establish private ownership. Missing website/contact tags do not prove a business lacks them. Zimbabwe map coverage is incomplete and the public endpoint can be rate-limited; searches run only on demand and results are cached for 30 minutes.
               </div>
 
               {osmError && (
