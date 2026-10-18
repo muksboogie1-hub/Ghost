@@ -1,0 +1,7 @@
+{
+  "name": "Project Ghost - Zimbabwe Website Client Acquisition Platform",
+  "description": "Personal business intelligence and client acquisition CRM for freelance website developers in Zimbabwe to discover prospects, manage demos, and track paying clients.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
