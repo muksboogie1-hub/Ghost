@@ -21,14 +21,14 @@ import { storage } from '../../lib/storage';
 interface SettingsViewProps {
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
-  onResetSampleData: () => void;
+  onClearWorkspace: () => void;
   onRestoreBackup: (json: string) => { success: boolean; message: string };
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings,
   onSaveSettings,
-  onResetSampleData,
+  onClearWorkspace,
   onRestoreBackup,
 }) => {
   const [formData, setFormData] = useState<AppSettings>({ ...settings });
@@ -70,7 +70,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveSettings(formData);
+    const localSettings = { ...formData, storageMode: 'local' as const };
+    onSaveSettings(localSettings);
+    setFormData(localSettings);
     setSaveNotice(true);
     setTimeout(() => setSaveNotice(false), 3000);
   };
@@ -352,16 +354,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span>Database Persistence & Cloudflare / Supabase Sync</span>
             </h3>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#0d1117] text-neutral-300 border border-[#21262d]">
-              Current Engine: {formData.storageMode === 'supabase' && formData.supabaseUrl ? 'Supabase Cloud' : 'Local Offline-Ready'}
+              Current Engine: Local Browser Storage
             </span>
           </div>
 
           <div className="p-3 rounded-md bg-[#0d1117] border border-[#21262d] text-[11px] text-neutral-400 space-y-1.5">
             <p>
-              • <strong>Offline-Ready Local Workspace:</strong> All records are saved securely with instant sync. Export and restore backups anytime below.
+              • <strong>Local Workspace:</strong> Records stay in this browser. They do not sync to other devices; download JSON backups regularly.
             </p>
             <p>
-              • <strong>Supabase Cloud Database (Free-Tier & Cloudflare compatible):</strong> To synchronize across multiple devices or team members, enter your Supabase Project URL and Anon Key.
+              • <strong>Supabase Cloud Sync:</strong> Not implemented in this build. Adding credentials will not synchronize records yet; leave Local Workspace selected.
             </p>
           </div>
 
@@ -374,7 +376,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
               >
                 <option value="local">Local Workspace (Offline-ready, no credentials required)</option>
-                <option value="supabase">Supabase Cloud Database (Multi-device PostgreSQL)</option>
+                <option value="supabase" disabled>Supabase Cloud Database (not implemented yet)</option>
               </select>
             </div>
 
@@ -446,14 +448,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Reset workspace to the initial Zimbabwean verified market dataset? Any custom additions will be replaced.')) {
-                  onResetSampleData();
+                if (window.confirm('Clear all leads, activities, follow-ups, demos, clients, and payment records from this browser? This cannot be undone. Download a JSON backup first if you need these records.')) {
+                  onClearWorkspace();
                 }
               }}
               className="px-3.5 py-1.5 text-xs font-medium text-neutral-400 hover:text-white hover:bg-[#21262d] rounded transition-colors flex items-center gap-1.5 ml-auto"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset Sample Data</span>
+              <span>Clear Workspace Data</span>
             </button>
           </div>
 
