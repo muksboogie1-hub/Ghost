@@ -155,12 +155,13 @@ export default function App() {
 
   // Settings handlers
   const handleSaveSettings = (newSettings: AppSettings) => {
-    storage.saveSettings(newSettings);
-    setSettings(newSettings);
+    const localSettings = { ...newSettings, storageMode: 'local' as const };
+    storage.saveSettings(localSettings);
+    setSettings(localSettings);
   };
 
-  const handleResetSampleData = () => {
-    storage.resetToSampleData();
+  const handleClearWorkspace = () => {
+    storage.clearWorkspace();
     refreshAllData();
   };
 
@@ -344,7 +345,7 @@ export default function App() {
             <SettingsView
               settings={settings}
               onSaveSettings={handleSaveSettings}
-              onResetSampleData={handleResetSampleData}
+              onClearWorkspace={handleClearWorkspace}
               onRestoreBackup={handleRestoreBackup}
             />
           )}

@@ -27,6 +27,7 @@ import {
   AppSettings 
 } from '../../types';
 import { calculateOpportunityScore, formatOpportunitySummary } from '../../lib/scoring';
+import { discoverOSMBusinesses, type OSMBusinessCandidate } from '../../lib/osmDiscovery';
 
 interface DiscoveryViewProps {
   leads: Lead[];
@@ -57,17 +58,23 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   const [bizFacebook, setBizFacebook] = useState('');
   const [bizGoogleMaps, setBizGoogleMaps] = useState('');
   const [bizEmail, setBizEmail] = useState('');
-  const [bizWebsiteStatus, setBizWebsiteStatus] = useState<WebsiteStatus>('no_website');
+  const [bizWebsiteStatus, setBizWebsiteStatus] = useState<WebsiteStatus>('not_verified');
   const [evidence, setEvidence] = useState('');
   const [sourceLinks, setSourceLinks] = useState('');
-  const [confidence, setConfidence] = useState<ResearchConfidence>('Verified');
-  const [nextAction, setNextAction] = useState('Draft WhatsApp introduction with interactive website demo link.');
+  const [confidence, setConfidence] = useState<ResearchConfidence>('Unverified');
+  const [nextAction, setNextAction] = useState('Verify the website status, contact details, and source links before outreach.');
   const [contactPerson, setContactPerson] = useState('');
   const [contactRole, setContactRole] = useState('');
 
   // Diagnostic URL Tester
   const [testUrl, setTestUrl] = useState('');
   const [testResult, setTestResult] = useState<{ status: string; note: string } | null>(null);
+  const [osmResults, setOsmResults] = useState<OSMBusinessCandidate[]>([]);
+  const [osmLoading, setOsmLoading] = useState(false);
+  const [osmError, setOsmError] = useState('');
+  const [osmCached, setOsmCached] = useState(false);
+  const [osmFetchedAt, setOsmFetchedAt] = useState<string | null>(null);
+  const [osmResultScope, setOsmResultScope] = useState<{ city: CityZimbabwe; category: BusinessCategory } | null>(null);
 
   // Filter existing researched leads
   const [filterCity, setFilterCity] = useState<string>('All');
@@ -131,37 +138,132 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
 
   const handleTestUrl = () => {
     if (!testUrl.trim()) return;
-    const clean = testUrl.trim();
-    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+
+    let parsed: URL;
+    try {
+      parsed = new URL(testUrl.trim());
+    } catch {
       setTestResult({
-        status: 'Invalid format',
-        note: 'Please include http:// or https:// prefix to test domain protocol.',
+        status: 'Invalid URL',
+        note: 'Enter a complete URL including http:// or https://. This tool checks URL format only; it does not fetch the site.',
       });
       return;
     }
 
-    if (clean.includes('facebook.com') || clean.includes('instagram.com')) {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       setTestResult({
-        status: 'Social Profile Only',
-        note: 'This points to a social media account, not a dedicated independent website domain.',
+        status: 'Unsupported URL scheme',
+        note: 'Only HTTP and HTTPS website URLs are supported.',
+      });
+      return;
+    }
+
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const socialDomains = ['facebook.com', 'instagram.com'];
+    if (socialDomains.some((domain) => hostname === domain || hostname.endsWith('.' + domain))) {
+      setTestResult({
+        status: 'Social profile URL',
+        note: 'This URL appears to point to a social profile, not a standalone website. Confirm it is the business’s current official page before logging it.',
       });
       setBizWebsiteStatus('social_only');
       return;
     }
 
-    if (clean.startsWith('http://') && !clean.startsWith('https://')) {
+    if (parsed.protocol === 'http:') {
       setTestResult({
-        status: 'Missing SSL / Insecure HTTP',
-        note: 'Site uses unencrypted HTTP. Chrome/Safari show "Not Secure" warnings to smartphone users.',
+        status: 'HTTP URL — verify HTTPS',
+        note: 'The URL uses HTTP rather than HTTPS. This format check does not confirm whether the site loads, whether HTTPS is available, or whether the site has other problems.',
       });
-      setBizWebsiteStatus('outdated_usability');
+      setBizWebsiteStatus('not_verified');
       return;
     }
 
     setTestResult({
-      status: 'Website Link Configured',
-      note: 'Inspect live site for mobile viewport responsiveness, WhatsApp contact CTA, and recent copyright year.',
+      status: 'HTTPS URL format detected',
+      note: 'This only checks the URL format. It does not request the website, test availability, validate its certificate, or check mobile usability. Open and inspect the site manually before classifying it.',
     });
+  };
+
+  const handleDiscoverOSM = async () => {
+    const city = targetCity;
+    const category = targetCategory;
+    setOsmLoading(true);
+    setOsmError('');
+    try {
+      const result = await discoverOSMBusinesses(city, category);
+      setOsmResults(result.results);
+      setOsmCached(result.cached);
+      setOsmFetchedAt(result.fetchedAt);
+      setOsmResultScope({ city, category });
+      if (result.results.length === 0) {
+        setOsmError('No named map entries were returned. This does not mean no businesses exist; OpenStreetMap coverage can be incomplete.');
+      }
+    } catch (error) {
+      setOsmError(error instanceof Error ? error.message : 'Live business discovery failed.');
+    } finally {
+      setOsmLoading(false);
+    }
+  };
+
+  const handleImportOSMCandidate = (candidate: OSMBusinessCandidate) => {
+    const city = osmResultScope?.city ?? targetCity;
+    const category = candidate.category;
+    const existing = leads.some((lead) => lead.researchSourceLinks?.includes(candidate.sourceUrl));
+    if (existing) return;
+
+    const now = new Date().toISOString();
+    const researchNote = 'OpenStreetMap listing found. This verifies only that a map entry exists; current operation, ownership, fit for the selected niche, contact accuracy, and website status still need verification.';
+    const partialLead: Partial<Lead> = {
+      businessName: candidate.name,
+      category,
+      townCity: city,
+      physicalAddress: candidate.address || `Address not listed in OpenStreetMap; area searched: ${city}.`,
+      phone: candidate.phone || '',
+      whatsappNumber: candidate.whatsapp,
+      websiteUrl: candidate.website,
+      facebookUrl: candidate.facebook,
+      instagramUrl: candidate.instagram,
+      email: candidate.email,
+      websiteStatus: 'not_verified',
+      evidenceOfProblem: researchNote,
+      researchDate: now.slice(0, 10),
+      researchSourceLinks: [candidate.sourceUrl, 'https://www.openstreetmap.org/copyright'],
+      researchConfidence: 'Likely',
+      recommendedNextAction: 'Verify that the business is active, confirm public contact details, and inspect its official website before outreach.',
+      status: 'Researching',
+      notes: `Found in an OpenStreetMap search for ${category} in ${city}. Do not treat this as a verified sales opportunity until independently checked.`,
+    };
+    const score = calculateOpportunityScore(partialLead, settings.scoringWeights);
+    const lead: Lead = {
+      id: `lead-osm-${candidate.osmType}-${candidate.id.split('/')[1]}`,
+      businessName: candidate.name,
+      category,
+      townCity: city,
+      physicalAddress: partialLead.physicalAddress!,
+      contactPerson: undefined,
+      contactRole: undefined,
+      phone: partialLead.phone!,
+      whatsappNumber: candidate.whatsapp,
+      googleMapsUrl: undefined,
+      websiteUrl: candidate.website,
+      facebookUrl: candidate.facebook,
+      instagramUrl: candidate.instagram,
+      email: candidate.email,
+      websiteStatus: 'not_verified',
+      evidenceOfProblem: researchNote,
+      researchDate: now.slice(0, 10),
+      researchSourceLinks: partialLead.researchSourceLinks!,
+      researchConfidence: 'Likely',
+      recommendedNextAction: partialLead.recommendedNextAction!,
+      status: 'Researching',
+      notes: partialLead.notes!,
+      opportunityScore: score.total,
+      scorePriority: score.priority,
+      scoreExplanation: formatOpportunitySummary(score),
+      createdAt: now,
+      updatedAt: now,
+    };
+    onSaveLead(lead);
   };
 
   const handleSaveDiscoveredLead = (e: React.FormEvent) => {
@@ -185,13 +287,13 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       facebookUrl: bizFacebook.trim() || undefined,
       email: bizEmail.trim() || undefined,
       websiteStatus: bizWebsiteStatus,
-      evidenceOfProblem: evidence.trim() || 'No active website found on public registers or Google search.',
+      evidenceOfProblem: evidence.trim() || 'Not yet recorded. Verify the website status and add evidence before outreach.',
       researchDate: new Date().toISOString().split('T')[0],
       researchSourceLinks: sourceLinks ? sourceLinks.split('\n').filter(Boolean) : [],
       researchConfidence: confidence,
       recommendedNextAction: nextAction.trim(),
-      status: 'Ready to Contact',
-      notes: `Researched in ${targetCity}.`,
+      status: 'Researching',
+      notes: `Research started in ${targetCity}. Verify business details and website status before outreach.`,
     };
 
     const score = calculateOpportunityScore(partialLead, settings.scoringWeights);
@@ -238,6 +340,9 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
     setBizEmail('');
     setEvidence('');
     setSourceLinks('');
+    setConfidence('Unverified');
+    setBizWebsiteStatus('not_verified');
+    setNextAction('Verify the website status, contact details, and source links before outreach.');
     setContactPerson('');
     setContactRole('');
     setResearchMode('launchpad');
@@ -272,7 +377,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
               </h2>
             </div>
             <p className="text-xs text-neutral-400 max-w-2xl">
-              Query legitimate public sources in Zimbabwe to uncover real businesses without websites, broken links, or Facebook-only presences.
+              Open public search sources for manual research. Results are not imported automatically; verify each business and record sources before outreach.
             </p>
           </div>
 
@@ -338,6 +443,85 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                 >
                   Log Finding for {targetCity}
                 </button>
+              </div>
+            </div>
+
+            {/* Live, source-linked OpenStreetMap discovery */}
+            <div className="p-4 rounded-md bg-[#0d1117] border border-emerald-500/25 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-emerald-400" />
+                    Live business candidates
+                  </h3>
+                  <p className="text-[11px] text-neutral-400 mt-1">
+                    Query OpenStreetMap for named map listings within about 10 km of the selected city centre.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDiscoverOSM}
+                  disabled={osmLoading}
+                  className="px-4 py-2 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white flex items-center justify-center gap-2 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${osmLoading ? 'animate-spin' : ''}`} />
+                  {osmLoading ? 'Searching map data…' : 'Find business candidates'}
+                </button>
+              </div>
+              <div className="text-[11px] text-neutral-500">
+                Source: OpenStreetMap contributors. These are map-listed candidates, not verified leads. Healthcare map tags do not establish private ownership. Missing website/contact tags do not prove a business lacks them. Zimbabwe map coverage is incomplete and the public endpoint can be rate-limited; searches run only on demand and results are cached for 30 minutes.
+              </div>
+
+              {osmError && (
+                <div className="rounded-md border border-amber-500/25 bg-amber-500/5 p-3 text-xs text-amber-200">
+                  {osmError}
+                </div>
+              )}
+
+              {osmResultScope && osmResults.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-400">
+                    <span>{osmResults.length} named map entries · {osmResultScope.category} · {osmResultScope.city}</span>
+                    <span>{osmCached ? 'Cached result' : 'Fetched'}{osmFetchedAt ? ` · ${new Date(osmFetchedAt).toLocaleString()}` : ''}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {osmResults.map((candidate) => {
+                      const alreadyImported = leads.some((lead) => lead.researchSourceLinks?.includes(candidate.sourceUrl));
+                      const contact = candidate.phone || candidate.whatsapp || candidate.email;
+                      return (
+                        <div key={candidate.id} className="rounded-md border border-[#30363d] bg-[#111720] p-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-white truncate">{candidate.name}</div>
+                            <div className="text-[11px] text-neutral-400 mt-1">
+                              {candidate.address || `Address not listed · ${osmResultScope.city}`}
+                              {contact ? ` · ${contact}` : ' · No public contact tag in this map entry'}
+                            </div>
+                            {candidate.website && (
+                              <div className="text-[11px] mt-1 truncate">
+                                <a href={candidate.website} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline">{candidate.website}</a>
+                                <span className="text-neutral-500"> · Website status unverified</span>
+                              </div>
+                            )}
+                            <a href={candidate.sourceUrl} target="_blank" rel="noreferrer" className="text-[11px] text-emerald-300 hover:underline inline-flex items-center gap-1 mt-1">
+                              View OpenStreetMap source <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleImportOSMCandidate(candidate)}
+                            disabled={alreadyImported}
+                            className="text-xs rounded-md px-3 py-2 bg-[#21262d] hover:bg-[#30363d] disabled:opacity-60 disabled:cursor-not-allowed text-white shrink-0"
+                          >
+                            {alreadyImported ? 'Already in leads' : 'Add to research queue'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="text-[10px] text-neutral-600">
+                © OpenStreetMap contributors · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline hover:text-neutral-400">ODbL attribution</a>
               </div>
             </div>
 
