@@ -151,7 +151,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       return;
     }
 
-    const hostname = parsed.hostname.toLowerCase().replace(/^www\\./, '');
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
     const socialDomains = ['facebook.com', 'instagram.com'];
     if (socialDomains.some((domain) => hostname === domain || hostname.endsWith('.' + domain))) {
       setTestResult({
