@@ -276,10 +276,10 @@ export async function discoverOSMBusinesses(
   const query = [
     '[out:json][timeout:20];',
     '(',
-    ...filters.map((filter) => \`  nwr(around:\${RADIUS_METERS},\${lat},\${lon})["name"]\${filter};\`),
+    ...filters.map((filter) => `  nwr(around:${RADIUS_METERS},${lat},${lon})["name"]${filter};`),
     ');',
-    \`out center tags \${RESULT_LIMIT};\`,
-  ].join('\\n');
+    `out center tags ${RESULT_LIMIT};`,
+  ].join('\n');
 
   const diagnostics: string[] = [];
   let elements: OverpassElement[] | undefined;
