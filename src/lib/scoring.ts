@@ -76,25 +76,26 @@ export function calculateOpportunityScore(
   }
 
   // 2. Direct Contact Accessibility Factor (WhatsApp / Phone)
+  const researchVerified = lead.researchConfidence === 'Verified';
   const hasPhone = Boolean(lead.phone && lead.phone.trim().length > 5);
   const hasWhatsApp = Boolean(lead.whatsappNumber && lead.whatsappNumber.trim().length > 5);
-  if (hasPhone || hasWhatsApp) {
+  if ((hasPhone || hasWhatsApp) && researchVerified) {
     score += weights.phoneAvailable;
     factors.push({
       label: 'Direct Contact Available',
       points: weights.phoneAvailable,
-      description: hasWhatsApp ? 'Verified WhatsApp number on file for rapid direct outreach.' : 'Public phone line verified.',
+      description: hasWhatsApp ? 'WhatsApp number has been marked verified for direct outreach.' : 'Public phone line has been marked verified.',
     });
   }
 
   // 3. Online Presence & Activity
   const hasSocials = Boolean(lead.facebookUrl || lead.instagramUrl || lead.googleMapsUrl);
-  if (hasSocials) {
+  if (hasSocials && researchVerified) {
     score += weights.activeOnlinePresence;
     factors.push({
       label: 'Active Digital Footprint',
       points: weights.activeOnlinePresence,
-      description: 'Business demonstrates commercial intent and existing customer base via social or Google Maps.',
+      description: 'A social or business listing URL has been marked verified.',
     });
   }
 
