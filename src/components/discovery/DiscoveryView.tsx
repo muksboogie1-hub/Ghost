@@ -57,11 +57,11 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
   const [bizFacebook, setBizFacebook] = useState('');
   const [bizGoogleMaps, setBizGoogleMaps] = useState('');
   const [bizEmail, setBizEmail] = useState('');
-  const [bizWebsiteStatus, setBizWebsiteStatus] = useState<WebsiteStatus>('no_website');
+  const [bizWebsiteStatus, setBizWebsiteStatus] = useState<WebsiteStatus>('not_verified');
   const [evidence, setEvidence] = useState('');
   const [sourceLinks, setSourceLinks] = useState('');
-  const [confidence, setConfidence] = useState<ResearchConfidence>('Verified');
-  const [nextAction, setNextAction] = useState('Draft WhatsApp introduction with interactive website demo link.');
+  const [confidence, setConfidence] = useState<ResearchConfidence>('Unverified');
+  const [nextAction, setNextAction] = useState('Verify the website status, contact details, and source links before outreach.');
   const [contactPerson, setContactPerson] = useState('');
   const [contactRole, setContactRole] = useState('');
 
@@ -131,36 +131,49 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
 
   const handleTestUrl = () => {
     if (!testUrl.trim()) return;
-    const clean = testUrl.trim();
-    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+
+    let parsed: URL;
+    try {
+      parsed = new URL(testUrl.trim());
+    } catch {
       setTestResult({
-        status: 'Invalid format',
-        note: 'Please include http:// or https:// prefix to test domain protocol.',
+        status: 'Invalid URL',
+        note: 'Enter a complete URL including http:// or https://. This tool checks URL format only; it does not fetch the site.',
       });
       return;
     }
 
-    if (clean.includes('facebook.com') || clean.includes('instagram.com')) {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       setTestResult({
-        status: 'Social Profile Only',
-        note: 'This points to a social media account, not a dedicated independent website domain.',
+        status: 'Unsupported URL scheme',
+        note: 'Only HTTP and HTTPS website URLs are supported.',
+      });
+      return;
+    }
+
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\\./, '');
+    const socialDomains = ['facebook.com', 'instagram.com'];
+    if (socialDomains.some((domain) => hostname === domain || hostname.endsWith('.' + domain))) {
+      setTestResult({
+        status: 'Social profile URL',
+        note: 'This URL appears to point to a social profile, not a standalone website. Confirm it is the business’s current official page before logging it.',
       });
       setBizWebsiteStatus('social_only');
       return;
     }
 
-    if (clean.startsWith('http://') && !clean.startsWith('https://')) {
+    if (parsed.protocol === 'http:') {
       setTestResult({
-        status: 'Missing SSL / Insecure HTTP',
-        note: 'Site uses unencrypted HTTP. Chrome/Safari show "Not Secure" warnings to smartphone users.',
+        status: 'HTTP URL — verify HTTPS',
+        note: 'The URL uses HTTP rather than HTTPS. This format check does not confirm whether the site loads, whether HTTPS is available, or whether the site has other problems.',
       });
-      setBizWebsiteStatus('outdated_usability');
+      setBizWebsiteStatus('not_verified');
       return;
     }
 
     setTestResult({
-      status: 'Website Link Configured',
-      note: 'Inspect live site for mobile viewport responsiveness, WhatsApp contact CTA, and recent copyright year.',
+      status: 'HTTPS URL format detected',
+      note: 'This only checks the URL format. It does not request the website, test availability, validate its certificate, or check mobile usability. Open and inspect the site manually before classifying it.',
     });
   };
 
@@ -185,13 +198,13 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
       facebookUrl: bizFacebook.trim() || undefined,
       email: bizEmail.trim() || undefined,
       websiteStatus: bizWebsiteStatus,
-      evidenceOfProblem: evidence.trim() || 'No active website found on public registers or Google search.',
+      evidenceOfProblem: evidence.trim() || 'Not yet recorded. Verify the website status and add evidence before outreach.',
       researchDate: new Date().toISOString().split('T')[0],
       researchSourceLinks: sourceLinks ? sourceLinks.split('\n').filter(Boolean) : [],
       researchConfidence: confidence,
       recommendedNextAction: nextAction.trim(),
-      status: 'Ready to Contact',
-      notes: `Researched in ${targetCity}.`,
+      status: 'Researching',
+      notes: `Research started in ${targetCity}. Verify business details and website status before outreach.`,
     };
 
     const score = calculateOpportunityScore(partialLead, settings.scoringWeights);
@@ -238,6 +251,9 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
     setBizEmail('');
     setEvidence('');
     setSourceLinks('');
+    setConfidence('Unverified');
+    setBizWebsiteStatus('not_verified');
+    setNextAction('Verify the website status, contact details, and source links before outreach.');
     setContactPerson('');
     setContactRole('');
     setResearchMode('launchpad');
@@ -272,7 +288,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
               </h2>
             </div>
             <p className="text-xs text-neutral-400 max-w-2xl">
-              Query legitimate public sources in Zimbabwe to uncover real businesses without websites, broken links, or Facebook-only presences.
+              Open public search sources for manual research. Results are not imported automatically; verify each business and record sources before outreach.
             </p>
           </div>
 
