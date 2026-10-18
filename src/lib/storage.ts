@@ -6,7 +6,7 @@ import {
   ClientRecord, 
   AppSettings 
 } from '../types';
-import { INITIAL_SETTINGS } from './seedData';} from './seedData';
+import { INITIAL_SETTINGS } from './seedData';
 
 const STORAGE_KEYS = {
   LEADS: 'project_ghost_leads_v1',
