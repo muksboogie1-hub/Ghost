@@ -37,7 +37,10 @@ interface OverpassPayload {
   remark?: string;
 }
 
-const ENDPOINT = 'https://overpass-api.de/api/interpreter';
+const ENDPOINTS = [
+  { url: 'https://overpass-api.de/api/interpreter', label: 'overpass-api.de' },
+  { url: 'https://overpass.private.coffee/api/interpreter', label: 'overpass.private.coffee' },
+] as const;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const RADIUS_METERS = 10000;
 const RESULT_LIMIT = 80;
@@ -204,6 +207,53 @@ function writeCache(city: CityZimbabwe, category: BusinessCategory, result: OSMD
   }
 }
 
+async function fetchFromEndpoint(endpoint: string, query: string): Promise<OverpassElement[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: 'data=' + encodeURIComponent(query),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status + (response.statusText ? ' ' + response.statusText : ''));
+    }
+
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+    const body = await response.text();
+    if (contentType.includes('text/html') || /^\s*</.test(body)) {
+      throw new Error('received HTML instead of JSON');
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body) as unknown;
+    } catch {
+      throw new Error('received invalid JSON');
+    }
+
+    if (!payload || typeof payload !== 'object' || !Array.isArray((payload as OverpassPayload).elements)) {
+      const remark = payload && typeof payload === 'object'
+        ? (payload as OverpassPayload).remark
+        : undefined;
+      throw new Error(remark || 'invalid Overpass response: elements array missing');
+    }
+
+    return (payload as OverpassPayload).elements as OverpassElement[];
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('request timed out after 15 seconds');
+    }
+    throw error instanceof Error ? error : new Error('unknown network error');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Fetch a small, user-triggered OpenStreetMap Overpass search.
  * This returns map candidates only; absence of a website tag is NOT proof that
@@ -226,57 +276,43 @@ export async function discoverOSMBusinesses(
   const query = [
     '[out:json][timeout:20];',
     '(',
-    ...filters.map((filter) => `  nwr(around:${RADIUS_METERS},${lat},${lon})["name"]${filter};`),
+    ...filters.map((filter) => \`  nwr(around:\${RADIUS_METERS},\${lat},\${lon})["name"]\${filter};\`),
     ');',
-    `out center tags ${RESULT_LIMIT};`,
-  ].join('\n');
+    \`out center tags \${RESULT_LIMIT};\`,
+  ].join('\\n');
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const diagnostics: string[] = [];
+  let elements: OverpassElement[] | undefined;
 
-  try {
-    const response = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: 'data=' + encodeURIComponent(query),
-      signal: controller.signal,
-    });
-
-    if (response.status === 429 || response.status === 503) {
-      throw new Error('OpenStreetMap search is busy or rate-limited. Wait at least 30 seconds before trying again.');
+  for (const endpoint of ENDPOINTS) {
+    try {
+      elements = await fetchFromEndpoint(endpoint.url, query);
+      break;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      diagnostics.push(endpoint.label + ': ' + detail);
     }
-    if (!response.ok) {
-      throw new Error('OpenStreetMap search failed (HTTP ' + response.status + '). Try again later.');
-    }
-
-    const payload = await response.json() as OverpassPayload;
-    if (!Array.isArray(payload.elements)) {
-      throw new Error(payload.remark || 'OpenStreetMap returned an unexpected response.');
-    }
-
-    const unique = new Map<string, OSMBusinessCandidate>();
-    for (const element of payload.elements) {
-      const candidate = toCandidate(element, category);
-      if (candidate) unique.set(candidate.id, candidate);
-    }
-
-    const results = [...unique.values()]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, RESULT_LIMIT);
-
-    const result: OSMDiscoveryResponse = {
-      results,
-      cached: false,
-      fetchedAt: new Date().toISOString(),
-    };
-    writeCache(city, category, result);
-    return result;
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('OpenStreetMap search timed out. Try again later; the public service can be busy.');
-    }
-    throw error instanceof Error ? error : new Error('OpenStreetMap search failed unexpectedly.');
-  } finally {
-    clearTimeout(timeout);
   }
+
+  if (elements === undefined) {
+    throw new Error('All configured OpenStreetMap sources failed. Details: ' + diagnostics.join('; '));
+  }
+
+  const unique = new Map<string, OSMBusinessCandidate>();
+  for (const element of elements) {
+    const candidate = toCandidate(element, category);
+    if (candidate) unique.set(candidate.id, candidate);
+  }
+
+  const results = [...unique.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, RESULT_LIMIT);
+
+  const result: OSMDiscoveryResponse = {
+    results,
+    cached: false,
+    fetchedAt: new Date().toISOString(),
+  };
+  writeCache(city, category, result);
+  return result;
 }
