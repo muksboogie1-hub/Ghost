@@ -62,7 +62,7 @@ const CITY_CENTRES: Partial<Record<CityZimbabwe, [number, number]>> = {
 const CATEGORY_FILTERS: Record<BusinessCategory, string[]> = {
   'Tombstone & Granite': [
     '["craft"="stonemason"]',
-    '["shop"="building_materials"]',
+    '["shop"="gravestone"]',
   ],
   'Restaurants & Cafés': [
     '["amenity"~"^(restaurant|cafe|fast_food|food_court)$"]',
@@ -92,8 +92,8 @@ const CATEGORY_FILTERS: Record<BusinessCategory, string[]> = {
     '["shop"~"^(car_repair|car_parts|tyres|car)$"]',
   ],
   'Solar & Clean Energy': [
-    '["shop"="electrical"]',
-    '["craft"="electrician"]',
+    '["craft"="photovoltaic"]',
+    '["shop"="photovoltaic"]',
   ],
   'Education & Training': [
     '["amenity"~"^(school|college|university|language_school)$"]',
