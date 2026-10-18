@@ -1,4 +1,3 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { 
   Lead, 
   Activity, 
@@ -7,14 +6,7 @@ import {
   ClientRecord, 
   AppSettings 
 } from '../types';
-import { 
-  INITIAL_SETTINGS, 
-  INITIAL_LEADS, 
-  INITIAL_ACTIVITIES, 
-  INITIAL_FOLLOWUPS, 
-  INITIAL_DEMOS, 
-  INITIAL_CLIENTS 
-} from './seedData';
+import { INITIAL_SETTINGS } from './seedData';} from './seedData';
 
 const STORAGE_KEYS = {
   LEADS: 'project_ghost_leads_v1',
@@ -25,8 +17,15 @@ const STORAGE_KEYS = {
   SETTINGS: 'project_ghost_settings_v1',
 };
 
+const SAMPLE_RECORD_IDS = {
+  leads: new Set(['lead-zim-001', 'lead-zim-002', 'lead-zim-003', 'lead-zim-004', 'lead-zim-005', 'lead-zim-006', 'lead-zim-007', 'lead-zim-008']),
+  activities: new Set(['act-001', 'act-002', 'act-003']),
+  followUps: new Set(['fu-001', 'fu-002', 'fu-003']),
+  demos: new Set(['demo-001', 'demo-002', 'demo-003']),
+  clients: new Set(['client-zim-101', 'client-zim-102']),
+};
+
 class StorageEngine {
-  private supabase: SupabaseClient | null = null;
   private settings: AppSettings = INITIAL_SETTINGS;
 
   constructor() {
@@ -37,10 +36,8 @@ class StorageEngine {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (saved) {
-        this.settings = { ...INITIAL_SETTINGS, ...JSON.parse(saved) };
-        if (this.settings.supabaseUrl && this.settings.supabaseAnonKey) {
-          this.supabase = createClient(this.settings.supabaseUrl, this.settings.supabaseAnonKey);
-        }
+        // Cloud sync is not implemented yet. Keep the stored mode honest.
+        this.settings = { ...INITIAL_SETTINGS, ...JSON.parse(saved), storageMode: 'local' };
       }
     } catch (e) {
       console.warn('Could not parse settings from storage:', e);
@@ -51,47 +48,51 @@ class StorageEngine {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (saved) {
-        return { ...INITIAL_SETTINGS, ...JSON.parse(saved) };
+        return { ...INITIAL_SETTINGS, ...JSON.parse(saved), storageMode: 'local' };
       }
     } catch (e) {
-      console.warn(e);
+      console.warn('Could not read settings from storage:', e);
     }
-    return INITIAL_SETTINGS;
+    return { ...INITIAL_SETTINGS, storageMode: 'local' };
   }
 
   public saveSettings(newSettings: AppSettings): void {
-    this.settings = newSettings;
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(newSettings));
-    if (newSettings.supabaseUrl && newSettings.supabaseAnonKey) {
-      try {
-        this.supabase = createClient(newSettings.supabaseUrl, newSettings.supabaseAnonKey);
-      } catch (err) {
-        console.error('Failed to init Supabase client:', err);
-      }
-    } else {
-      this.supabase = null;
-    }
+    // Do not imply records sync to Supabase until the data layer really uses it.
+    this.settings = { ...newSettings, storageMode: 'local' };
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(this.settings));
   }
 
   public getStorageMode(): 'local' | 'supabase' {
-    return this.settings.storageMode === 'supabase' && Boolean(this.supabase) 
-      ? 'supabase' 
-      : 'local';
+    return 'local';
+  }
+
+  private readStoredRecords<T extends { id: string }>(
+    key: string,
+    excludedIds: ReadonlySet<string> = new Set<string>(),
+  ): T[] {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Stored value for ' + key + ' is not an array.');
+      }
+      const records = (parsed as T[]).filter(
+        (item) => item && typeof item.id === 'string' && !excludedIds.has(item.id),
+      );
+      // Migrate the old demo workspace away while preserving user-created records.
+      if (raw === null || records.length !== parsed.length) {
+        localStorage.setItem(key, JSON.stringify(records));
+      }
+      return records;
+    } catch (e) {
+      console.error('Could not read records from ' + key + ':', e);
+      return [];
+    }
   }
 
   // --- LEADS ---
   public getLeads(): Lead[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.LEADS);
-      if (raw) {
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    // First load seed data
-    this.saveLeads(INITIAL_LEADS);
-    return INITIAL_LEADS;
+    return this.readStoredRecords<Lead>(STORAGE_KEYS.LEADS, SAMPLE_RECORD_IDS.leads);
   }
 
   public saveLeads(leads: Lead[]): void {
@@ -177,17 +178,9 @@ class StorageEngine {
 
   // --- ACTIVITIES ---
   public getActivities(leadId?: string): Activity[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.ACTIVITIES);
-      const all: Activity[] = raw ? JSON.parse(raw) : INITIAL_ACTIVITIES;
-      if (leadId) {
-        return all.filter((a) => a.leadId === leadId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      }
-      return all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    } catch (e) {
-      console.error(e);
-      return [];
-    }
+    const all = this.readStoredRecords<Activity>(STORAGE_KEYS.ACTIVITIES, SAMPLE_RECORD_IDS.activities);
+    const records = leadId ? all.filter((a) => a.leadId === leadId) : all;
+    return records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public addActivity(act: Activity): void {
@@ -198,16 +191,7 @@ class StorageEngine {
 
   // --- FOLLOW-UPS ---
   public getFollowUps(): FollowUp[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.FOLLOWUPS);
-      if (raw) {
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    this.saveFollowUps(INITIAL_FOLLOWUPS);
-    return INITIAL_FOLLOWUPS;
+    return this.readStoredRecords<FollowUp>(STORAGE_KEYS.FOLLOWUPS, SAMPLE_RECORD_IDS.followUps);
   }
 
   public saveFollowUps(fus: FollowUp[]): void {
@@ -247,16 +231,7 @@ class StorageEngine {
 
   // --- DEMOS ---
   public getDemos(): Demo[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.DEMOS);
-      if (raw) {
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    this.saveDemos(INITIAL_DEMOS);
-    return INITIAL_DEMOS;
+    return this.readStoredRecords<Demo>(STORAGE_KEYS.DEMOS, SAMPLE_RECORD_IDS.demos);
   }
 
   public saveDemos(demos: Demo[]): void {
@@ -312,16 +287,7 @@ class StorageEngine {
 
   // --- CLIENTS & SALES ---
   public getClients(): ClientRecord[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.CLIENTS);
-      if (raw) {
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    this.saveClients(INITIAL_CLIENTS);
-    return INITIAL_CLIENTS;
+    return this.readStoredRecords<ClientRecord>(STORAGE_KEYS.CLIENTS, SAMPLE_RECORD_IDS.clients);
   }
 
   public saveClients(clients: ClientRecord[]): void {
@@ -549,12 +515,13 @@ class StorageEngine {
     }
   }
 
-  public resetToSampleData(): void {
-    this.saveLeads(INITIAL_LEADS);
-    localStorage.setItem(STORAGE_KEYS.ACTIVITIES, JSON.stringify(INITIAL_ACTIVITIES));
-    this.saveFollowUps(INITIAL_FOLLOWUPS);
-    this.saveDemos(INITIAL_DEMOS);
-    this.saveClients(INITIAL_CLIENTS);
+  public clearWorkspace(): void {
+    // Explicitly clear records; keep preferences so configuration is not lost.
+    this.saveLeads([]);
+    localStorage.setItem(STORAGE_KEYS.ACTIVITIES, JSON.stringify([]));
+    this.saveFollowUps([]);
+    this.saveDemos([]);
+    this.saveClients([]);
   }
 
   // --- SUPABASE SQL SCHEMA GENERATOR ---
